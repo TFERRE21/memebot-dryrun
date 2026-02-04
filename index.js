@@ -6,112 +6,96 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/**
- * Estado global do bot (simulação)
- */
-let state = {
+const PORT = process.env.PORT || 3000;
+
+// estado global do bot
+let status = {
   ligado: false,
   config: null,
   simulacoes: []
 };
 
-/**
- * Rota raiz (health check)
- */
+// ===== ROTAS =====
+
+// health check
 app.get("/", (req, res) => {
-  res.json({ status: "Memebot DRY-RUN online" });
+  res.send("Memebot DRY-RUN ONLINE");
 });
 
-/**
- * Ligar bot (POST)
- */
+// ligar bot
 app.post("/start", (req, res) => {
   const { network, minCap, tradeValueBRL, takeProfit } = req.body;
 
-  // validações básicas
   if (!network || !minCap || !tradeValueBRL || !takeProfit) {
-    return res.status(400).json({
-      error: "Configuração inválida"
-    });
+    return res.status(400).json({ error: "Configuração inválida" });
   }
 
-  state.ligado = true;
-  state.config = {
+  status.ligado = true;
+  status.config = {
     network,
     minCap,
     tradeValueBRL,
     takeProfit
   };
+  status.simulacoes = [];
+
+  console.log("BOT LIGADO:", status.config);
 
   res.json({
+    ok: true,
     msg: "Bot ligado (simulação)",
-    config: state.config
+    status
   });
 });
 
-/**
- * Parar bot (POST)
- */
+// parar bot
 app.post("/stop", (req, res) => {
-  state.ligado = false;
-  res.json({ msg: "Bot parado" });
+  status.ligado = false;
+  console.log("BOT PARADO");
+
+  res.json({ ok: true, msg: "Bot parado" });
 });
 
-/**
- * Status do bot
- */
+// status
 app.get("/status", (req, res) => {
-  res.json(state);
+  res.json(status);
 });
 
-/**
- * Scanner de memecoins (SIMULAÇÃO)
- */
-async function scanMarket() {
-  if (!state.ligado || !state.config) return;
+// ===== SCANNER =====
+async function scan() {
+  if (!status.ligado || !status.config) return;
 
   try {
-    const resp = await axios.get(
+    const r = await axios.get(
       "https://api.dexscreener.com/latest/dex/pairs/solana"
     );
 
-    const pairs = resp.data.pairs || [];
+    for (const p of r.data.pairs) {
+      const fdv = Number(p.fdv || 0);
+      const price = Number(p.priceUsd || 0);
 
-    for (const p of pairs) {
-      if (!p.fdv || !p.priceUsd) continue;
-
-      if (p.fdv >= state.config.minCap) {
-        const entrada = Number(p.priceUsd);
-        const alvo =
-          entrada * (1 + state.config.takeProfit / 100);
-
-        state.simulacoes.push({
+      if (fdv >= status.config.minCap && price > 0) {
+        status.simulacoes.push({
           token: p.baseToken.symbol,
           address: p.baseToken.address,
-          entrada,
-          alvo,
-          marketCap: p.fdv,
+          entrada: price,
+          alvo: price * (1 + status.config.takeProfit / 100),
+          marketCap: fdv,
           timestamp: new Date().toISOString()
         });
 
-        // simula apenas 1 trade por ciclo
+        console.log("SIMULAÇÃO:", p.baseToken.symbol);
         break;
       }
     }
-  } catch (err) {
-    console.error("Erro ao consultar DexScreener");
+  } catch (e) {
+    console.log("Erro DexScreener");
   }
 }
 
-/**
- * Loop de simulação (15s)
- */
-setInterval(scanMarket, 15000);
+// roda a cada 15s
+setInterval(scan, 15000);
 
-/**
- * Render usa PORT automaticamente
- */
-const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🤖 Memebot DRY-RUN rodando na porta ${PORT}`);
+  console.log("Memebot DRY-RUN rodando na porta", PORT);
 });
