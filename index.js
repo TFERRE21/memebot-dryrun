@@ -1,101 +1,104 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <title>Memebot — Solana</title>
+import express from "express";
+import axios from "axios";
+import cors from "cors";
 
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 30px;
-      background: #f7f7f7;
+const app = express();
+
+/* =========================
+   CONFIGURAÇÃO GLOBAL
+========================= */
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
+}));
+
+app.use(express.json());
+
+/* =========================
+   ESTADO DO BOT (DRY-RUN)
+========================= */
+let status = {
+  ligado: false,
+  config: null,
+  simulacoes: []
+};
+
+/* =========================
+   ROTAS DA API
+========================= */
+
+// LIGAR BOT
+app.post("/start", (req, res) => {
+  status.ligado = true;
+  status.config = req.body;
+  status.simulacoes = [];
+
+  console.log("BOT LIGADO:", status.config);
+
+  res.json({
+    msg: "Bot ligado (simulação)",
+    config: status.config
+  });
+});
+
+// PARAR BOT
+app.post("/stop", (req, res) => {
+  status.ligado = false;
+
+  console.log("BOT PARADO");
+
+  res.json({ msg: "Bot parado" });
+});
+
+// STATUS
+app.get("/status", (req, res) => {
+  res.json(status);
+});
+
+/* =========================
+   SCANNER (DEXSCREENER)
+========================= */
+async function scan() {
+  if (!status.ligado || !status.config) return;
+
+  try {
+    const response = await axios.get(
+      "https://api.dexscreener.com/latest/dex/pairs/solana"
+    );
+
+    for (const pair of response.data.pairs) {
+      if (!pair.fdv || !pair.priceUsd) continue;
+
+      if (pair.fdv >= status.config.minCap) {
+        const preco = Number(pair.priceUsd);
+        const alvo =
+          preco * (1 + status.config.takeProfit / 100);
+
+        status.simulacoes.push({
+          token: pair.baseToken.symbol,
+          preco,
+          alvo,
+          timestamp: new Date().toISOString()
+        });
+
+        console.log("SIMULAÇÃO:", pair.baseToken.symbol);
+        break; // 1 trade por ciclo
+      }
     }
+  } catch (err) {
+    console.error("Erro ao buscar dados da DexScreener");
+  }
+}
 
-    h1 {
-      margin-bottom: 10px;
-    }
+// roda a cada 15 segundos
+setInterval(scan, 15000);
 
-    .card {
-      background: #fff;
-      padding: 20px;
-      border-radius: 8px;
-      max-width: 520px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
+/* =========================
+   START SERVER
+========================= */
+const PORT = process.env.PORT || 3000;
 
-    label {
-      display: block;
-      margin-top: 12px;
-      font-weight: bold;
-    }
-
-    input, select, button {
-      width: 100%;
-      padding: 10px;
-      margin-top: 6px;
-      font-size: 14px;
-    }
-
-    button {
-      cursor: pointer;
-    }
-
-    .row {
-      display: flex;
-      gap: 10px;
-      margin-top: 16px;
-    }
-
-    .row button {
-      flex: 1;
-    }
-
-    .status {
-      margin-top: 15px;
-      padding: 10px;
-      background: #eee;
-      border-radius: 6px;
-      white-space: pre-wrap;
-      font-family: monospace;
-      font-size: 13px;
-    }
-  </style>
-</head>
-<body>
-
-<h1>🤖 Memebot — Solana</h1>
-
-<div class="card">
-
-  <label>Rede</label>
-  <select disabled>
-    <option>Solana</option>
-  </select>
-
-  <label>Market Cap mínimo (USD)</label>
-  <input type="number" id="minCap" value="20000" />
-
-  <label>Valor por trade (R$)</label>
-  <input type="number" id="tradeValue" value="100" />
-
-  <label>Take Profit (%)</label>
-  <input type="number" id="takeProfit" value="20" />
-
-  <div class="row">
-    <button onclick="startBot()">▶️ Ligar bot</button>
-    <button onclick="stopBot()">⏹️ Parar bot</button>
-  </div>
-
-  <div class="status" id="status">
-Status: parado
-  </div>
-
-</div>
-
-<script>
-async function startBot() {
-  const config = {
-    network: "solana",
-    minCap: Number(document.getElementById("minCap").value),
-    tradeValueBRL: Number(document.getElementById("tradeValue").value),
-    takeProfit: Number(document.getElementById("takeProfit").value)
+app.listen(PORT, () => {
+  console.log("Memebot DRY-RUN rodando na porta", PORT);
+});
