@@ -1,58 +1,101 @@
-import express from "express";
-import axios from "axios";
-import cors from "cors";
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Memebot — Solana</title>
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-let status = {
-  ligado: false,
-  config: null,
-  simulacoes: []
-};
-
-app.post("/start", (req, res) => {
-  status.ligado = true;
-  status.config = req.body;
-  res.json({ msg: "Bot ligado", config: status.config });
-});
-
-app.post("/stop", (req, res) => {
-  status.ligado = false;
-  res.json({ msg: "Bot parado" });
-});
-
-app.get("/status", (req, res) => {
-  res.json(status);
-});
-
-async function scan() {
-  if (!status.ligado || !status.config) return;
-
-  try {
-    const r = await axios.get(
-      "https://api.dexscreener.com/latest/dex/pairs/solana"
-    );
-
-    for (const p of r.data.pairs) {
-      if (p.fdv && p.fdv >= status.config.minCap) {
-        status.simulacoes.push({
-          token: p.baseToken.symbol,
-          preco: p.priceUsd,
-          alvo: p.priceUsd * (1 + status.config.takeProfit / 100)
-        });
-        break;
-      }
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 30px;
+      background: #f7f7f7;
     }
-  } catch (e) {
-    console.log("Erro DexScreener");
-  }
-}
 
-setInterval(scan, 15000);
+    h1 {
+      margin-bottom: 10px;
+    }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log("Memebot DRY-RUN rodando")
-);
+    .card {
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 520px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+      font-weight: bold;
+    }
+
+    input, select, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      font-size: 14px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .row button {
+      flex: 1;
+    }
+
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      background: #eee;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🤖 Memebot — Solana</h1>
+
+<div class="card">
+
+  <label>Rede</label>
+  <select disabled>
+    <option>Solana</option>
+  </select>
+
+  <label>Market Cap mínimo (USD)</label>
+  <input type="number" id="minCap" value="20000" />
+
+  <label>Valor por trade (R$)</label>
+  <input type="number" id="tradeValue" value="100" />
+
+  <label>Take Profit (%)</label>
+  <input type="number" id="takeProfit" value="20" />
+
+  <div class="row">
+    <button onclick="startBot()">▶️ Ligar bot</button>
+    <button onclick="stopBot()">⏹️ Parar bot</button>
+  </div>
+
+  <div class="status" id="status">
+Status: parado
+  </div>
+
+</div>
+
+<script>
+async function startBot() {
+  const config = {
+    network: "solana",
+    minCap: Number(document.getElementById("minCap").value),
+    tradeValueBRL: Number(document.getElementById("tradeValue").value),
+    takeProfit: Number(document.getElementById("takeProfit").value)
