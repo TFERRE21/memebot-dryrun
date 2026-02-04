@@ -1,36 +1,58 @@
-<script>
-async function startBot() {
-  const config = {
-    network: "solana",
-    minCap: Number(document.getElementById("minCap").value),
-    tradeValueBRL: Number(document.getElementById("tradeValue").value),
-    takeProfit: Number(document.getElementById("takeProfit").value)
-  };
+import express from "express";
+import axios from "axios";
+import cors from "cors";
 
-  const res = await fetch(
-    "https://memebot-dryrun.onrender.com/start",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(config)
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+let status = {
+  ligado: false,
+  config: null,
+  simulacoes: []
+};
+
+app.post("/start", (req, res) => {
+  status.ligado = true;
+  status.config = req.body;
+  res.json({ msg: "Bot ligado", config: status.config });
+});
+
+app.post("/stop", (req, res) => {
+  status.ligado = false;
+  res.json({ msg: "Bot parado" });
+});
+
+app.get("/status", (req, res) => {
+  res.json(status);
+});
+
+async function scan() {
+  if (!status.ligado || !status.config) return;
+
+  try {
+    const r = await axios.get(
+      "https://api.dexscreener.com/latest/dex/pairs/solana"
+    );
+
+    for (const p of r.data.pairs) {
+      if (p.fdv && p.fdv >= status.config.minCap) {
+        status.simulacoes.push({
+          token: p.baseToken.symbol,
+          preco: p.priceUsd,
+          alvo: p.priceUsd * (1 + status.config.takeProfit / 100)
+        });
+        break;
+      }
     }
-  );
-
-  const data = await res.json();
-
-  document.getElementById("status").innerText =
-    "Status: bot LIGADO\n" + JSON.stringify(data, null, 2);
+  } catch (e) {
+    console.log("Erro DexScreener");
+  }
 }
 
-async function stopBot() {
-  await fetch(
-    "https://memebot-dryrun.onrender.com/stop",
-    { method: "POST" }
-  );
+setInterval(scan, 15000);
 
-  document.getElementById("status").innerText =
-    "Status: bot PARADO";
-}
-</script>
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () =>
+  console.log("Memebot DRY-RUN rodando")
+);
