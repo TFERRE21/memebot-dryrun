@@ -1,11 +1,11 @@
 {
-  "nome": "memebot-dryrun",
-  "versão": "1.0.0",
-  "tipo": "módulo",
-  "roteiros": {
-    "começar": "node index.js"
+  "name": "memebot-dryrun",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
   },
-  "dependências": {
+  "dependencies": {
     "axios": "^1.6.8",
     "express": "^4.19.2",
     "cors": "^2.8.5"
