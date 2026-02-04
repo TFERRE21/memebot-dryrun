@@ -3,39 +3,45 @@ import axios from "axios";
 import cors from "cors";
 
 const app = express();
-
-/* 🔓 libera chamadas do navegador (Vercel → Render) */
 app.use(cors());
 app.use(express.json());
 
-/* 📊 estado do bot */
 let status = {
   ligado: false,
   simulacoes: []
 };
 
-/* ⚙️ configurações da simulação */
-const MARKETCAP_MIN = 20000; // USD
-const TAKE_PROFIT = 1.2;     // +20%
+const MARKETCAP_MIN = 20000;
+const TAKE_PROFIT = 1.2;
 
-/* ▶️ ligar bot */
+/* ▶️ LIGAR BOT (GET + POST) */
+app.get("/start", (req, res) => {
+  status.ligado = true;
+  res.json({ msg: "Bot ligado (simulação)" });
+});
+
 app.post("/start", (req, res) => {
   status.ligado = true;
   res.json({ msg: "Bot ligado (simulação)" });
 });
 
-/* ⏹️ parar bot */
+/* ⏹️ PARAR BOT (GET + POST) */
+app.get("/stop", (req, res) => {
+  status.ligado = false;
+  res.json({ msg: "Bot parado" });
+});
+
 app.post("/stop", (req, res) => {
   status.ligado = false;
   res.json({ msg: "Bot parado" });
 });
 
-/* 📡 status para o painel */
+/* 📡 STATUS */
 app.get("/status", (req, res) => {
   res.json(status);
 });
 
-/* 🔍 scan de memecoins (simulação) */
+/* 🔍 SCAN SIMULADO */
 async function scan() {
   if (!status.ligado) return;
 
@@ -48,11 +54,10 @@ async function scan() {
       if (!p.fdv || !p.priceUsd) continue;
       if (p.fdv < MARKETCAP_MIN) continue;
 
-      /* evita duplicar o mesmo token */
-      const jaExiste = status.simulacoes.find(
+      const existe = status.simulacoes.find(
         t => t.token === p.baseToken.symbol
       );
-      if (jaExiste) continue;
+      if (existe) continue;
 
       status.simulacoes.push({
         token: p.baseToken.symbol,
@@ -61,21 +66,20 @@ async function scan() {
       });
 
       console.log(
-        `📈 SIMULADO: ${p.baseToken.symbol} | entrada ${p.priceUsd} | alvo ${p.priceUsd * TAKE_PROFIT}`
+        `📈 SIMULADO ${p.baseToken.symbol} | entrada ${p.priceUsd} | alvo ${p.priceUsd * TAKE_PROFIT}`
       );
 
-      break; // 1 simulação por ciclo
+      break;
     }
   } catch (e) {
     console.log("Erro API DexScreener");
   }
 }
 
-/* 🔁 loop contínuo */
 setInterval(scan, 15000);
 
-/* 🚀 servidor */
 app.listen(3000, () => {
   console.log("🚀 Memebot DRY-RUN rodando na porta 3000");
 });
+
 
