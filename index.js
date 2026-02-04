@@ -6,7 +6,7 @@
   <style>
     body { font-family: Arial, sans-serif; padding: 30px; background:#f7f7f7 }
     h1 { margin-bottom: 10px }
-    .card { background:#fff; padding:20px; border-radius:8px; max-width:520px }
+    .card { background:#fff; padding:20px; border-radius:8px; max-width:560px }
     label { display:block; margin-top:12px }
     input, select, button {
       width:100%; padding:10px; margin-top:6px; font-size:14px
@@ -15,6 +15,9 @@
     .row { display:flex; gap:10px; margin-top:16px }
     .row button { flex:1 }
     .status { margin-top:15px; padding:10px; background:#eee; border-radius:6px; white-space:pre-wrap }
+    ul { padding-left:18px }
+    li { margin-bottom:6px }
+    .profit { margin-top:10px; font-weight:bold }
   </style>
 </head>
 <body>
@@ -42,35 +45,54 @@
   </div>
 
   <div class="status" id="status">
-    Status: aguardando servidor...
+    Conectando ao servidor...
   </div>
+
+  <div class="profit" id="profit"></div>
+  <ul id="simulacoes"></ul>
 </div>
 
 <script>
 const API = "https://memebot-dryrun.onrender.com";
 
-// 🔁 Atualiza status automaticamente
 async function refreshStatus() {
   try {
     const r = await fetch(API + "/status");
     const data = await r.json();
 
-    let text = data.ligado ? "🟢 BOT LIGADO\n" : "🔴 BOT PARADO\n";
-    if (data.config) {
-      text += "\nConfig:\n" + JSON.stringify(data.config, null, 2);
-    }
-    if (data.simulacoes && data.simulacoes.length > 0) {
-      text += "\n\nSimulações:\n" + JSON.stringify(data.simulacoes, null, 2);
+    // status texto
+    document.getElementById("status").innerText =
+      data.ligado ? "🟢 BOT LIGADO" : "🔴 BOT PARADO";
+
+    // simulações
+    const ul = document.getElementById("simulacoes");
+    ul.innerHTML = "";
+
+    let lucroTotal = 0;
+    const tradeValue = data.config?.tradeValueBRL || 0;
+    const takeProfit = data.config?.takeProfit || 0;
+
+    if (data.simulacoes) {
+      data.simulacoes.forEach(s => {
+        const lucro = tradeValue * (takeProfit / 100);
+        lucroTotal += lucro;
+
+        const li = document.createElement("li");
+        li.innerText =
+          `${s.token} | Entrada: $${Number(s.preco).toFixed(6)} → Alvo: $${Number(s.alvo).toFixed(6)} (+${takeProfit}%)`;
+        ul.appendChild(li);
+      });
     }
 
-    document.getElementById("status").innerText = text;
+    document.getElementById("profit").innerText =
+      `💰 Lucro acumulado (simulado): R$ ${lucroTotal.toFixed(2)}`;
+
   } catch (e) {
     document.getElementById("status").innerText =
       "Erro ao conectar ao servidor";
   }
 }
 
-// ▶️ Ligar bot
 async function startBot() {
   const config = {
     network: "solana",
@@ -88,13 +110,11 @@ async function startBot() {
   refreshStatus();
 }
 
-// ⏹️ Parar bot
 async function stopBot() {
   await fetch(API + "/stop", { method: "POST" });
   refreshStatus();
 }
 
-// inicia polling a cada 5s
 setInterval(refreshStatus, 5000);
 refreshStatus();
 </script>
