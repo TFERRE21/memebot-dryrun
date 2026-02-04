@@ -111,7 +111,7 @@ setInterval(scanMarket, 15000);
 /**
  * Render usa PORT automaticamente
  */
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🤖 Memebot DRY-RUN rodando na porta ${PORT}`);
 });
