@@ -3,32 +3,32 @@ import axios from "axios";
 import cors from "cors";
 
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
 let status = {
   ligado: false,
+  config: null,
   simulacoes: []
 };
 
-const MARKETCAP_MIN = 20000;
-const TAKE_PROFIT = 1.2;
-
-/* ▶️ LIGAR BOT (GET + POST) */
-app.get("/start", (req, res) => {
-  status.ligado = true;
-  res.json({ msg: "Bot ligado (simulação)" });
-});
+// valores padrão
+let MIN_CAP = 20000;
+let TAKE_PROFIT = 1.2;
 
 app.post("/start", (req, res) => {
   status.ligado = true;
-  res.json({ msg: "Bot ligado (simulação)" });
-});
 
-/* ⏹️ PARAR BOT (GET + POST) */
-app.get("/stop", (req, res) => {
-  status.ligado = false;
-  res.json({ msg: "Bot parado" });
+  if (req.body?.minCap) MIN_CAP = req.body.minCap;
+  if (req.body?.takeProfit)
+    TAKE_PROFIT = 1 + req.body.takeProfit / 100;
+
+  status.config = req.body;
+
+  res.json({
+    msg: "Bot ligado (simulação)",
+    config: status.config
+  });
 });
 
 app.post("/stop", (req, res) => {
@@ -36,12 +36,10 @@ app.post("/stop", (req, res) => {
   res.json({ msg: "Bot parado" });
 });
 
-/* 📡 STATUS */
 app.get("/status", (req, res) => {
   res.json(status);
 });
 
-/* 🔍 SCAN SIMULADO */
 async function scan() {
   if (!status.ligado) return;
 
@@ -50,36 +48,36 @@ async function scan() {
       "https://api.dexscreener.com/latest/dex/pairs/solana"
     );
 
-    for (const p of r.data.pairs) {
-      if (!p.fdv || !p.priceUsd) continue;
-      if (p.fdv < MARKETCAP_MIN) continue;
+    const now = new Date().toISOString();
 
-      const existe = status.simulacoes.find(
-        t => t.token === p.baseToken.symbol
-      );
-      if (existe) continue;
+    for (const p of r.data.pairs) {
+      if (!p.priceUsd || !p.fdv) continue;
+      if (p.fdv < MIN_CAP) continue;
 
       status.simulacoes.push({
         token: p.baseToken.symbol,
-        preco: Number(p.priceUsd),
-        alvo: Number(p.priceUsd) * TAKE_PROFIT
+        precoEntrada: Number(p.priceUsd),
+        alvo: Number((p.priceUsd * TAKE_PROFIT).toFixed(6)),
+        marketCap: p.fdv,
+        hora: now
       });
 
-      console.log(
-        `📈 SIMULADO ${p.baseToken.symbol} | entrada ${p.priceUsd} | alvo ${p.priceUsd * TAKE_PROFIT}`
-      );
+      // limita histórico
+      if (status.simulacoes.length > 20) {
+        status.simulacoes.shift();
+      }
 
-      break;
+      break; // 1 simulação por ciclo
     }
   } catch (e) {
-    console.log("Erro API DexScreener");
+    console.log("Erro ao buscar dados da DexScreener");
   }
 }
 
 setInterval(scan, 15000);
 
-app.listen(3000, () => {
-  console.log("🚀 Memebot DRY-RUN rodando na porta 3000");
-});
+app.listen(3000, () =>
+  console.log("Memebot DRY-RUN rodando")
+);
 
 
