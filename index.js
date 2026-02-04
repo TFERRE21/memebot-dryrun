@@ -1,123 +1,80 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <title>Memebot — Solana</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 30px; background:#f7f7f7 }
-    h1 { margin-bottom: 10px }
-    .card { background:#fff; padding:20px; border-radius:8px; max-width:560px }
-    label { display:block; margin-top:12px }
-    input, select, button {
-      width:100%; padding:10px; margin-top:6px; font-size:14px
-    }
-    button { cursor:pointer }
-    .row { display:flex; gap:10px; margin-top:16px }
-    .row button { flex:1 }
-    .status { margin-top:15px; padding:10px; background:#eee; border-radius:6px; white-space:pre-wrap }
-    ul { padding-left:18px }
-    li { margin-bottom:6px }
-    .profit { margin-top:10px; font-weight:bold }
-  </style>
-</head>
-<body>
+import express from "express";
+import axios from "axios";
+import cors from "cors";
 
-<h1>🤖 Memebot — Solana</h1>
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-<div class="card">
-  <label>Rede</label>
-  <select disabled>
-    <option>Solana</option>
-  </select>
+let status = {
+  ligado: false,
+  config: null,
+  simulacoes: []
+};
 
-  <label>Market Cap mínimo (USD)</label>
-  <input type="number" id="minCap" value="20000" />
+// ▶️ START
+app.post("/start", (req, res) => {
+  status.ligado = true;
+  status.config = req.body;
+  status.simulacoes = [];
 
-  <label>Valor por trade (R$)</label>
-  <input type="number" id="tradeValue" value="100" />
+  console.log("BOT LIGADO COM CONFIG:", status.config);
 
-  <label>Take Profit (%)</label>
-  <input type="number" id="takeProfit" value="20" />
+  res.json({
+    ok: true,
+    msg: "Bot ligado (simulação)",
+    config: status.config
+  });
+});
 
-  <div class="row">
-    <button onclick="startBot()">▶️ Ligar bot</button>
-    <button onclick="stopBot()">⏹️ Parar bot</button>
-  </div>
+// ⏹️ STOP
+app.post("/stop", (req, res) => {
+  status.ligado = false;
+  res.json({ ok: true, msg: "Bot parado" });
+});
 
-  <div class="status" id="status">
-    Conectando ao servidor...
-  </div>
+// 📊 STATUS
+app.get("/status", (req, res) => {
+  res.json(status);
+});
 
-  <div class="profit" id="profit"></div>
-  <ul id="simulacoes"></ul>
-</div>
+// 🔁 SCAN
+async function scan() {
+  if (!status.ligado || !status.config) return;
 
-<script>
-const API = "https://memebot-dryrun.onrender.com";
-
-async function refreshStatus() {
   try {
-    const r = await fetch(API + "/status");
-    const data = await r.json();
+    const r = await axios.get(
+      "https://api.dexscreener.com/latest/dex/pairs/solana"
+    );
 
-    // status texto
-    document.getElementById("status").innerText =
-      data.ligado ? "🟢 BOT LIGADO" : "🔴 BOT PARADO";
+    const minCap = status.config.minCap;
+    const takeProfit = status.config.takeProfit;
 
-    // simulações
-    const ul = document.getElementById("simulacoes");
-    ul.innerHTML = "";
+    for (const p of r.data.pairs) {
+      if (!p.fdv || !p.priceUsd) continue;
 
-    let lucroTotal = 0;
-    const tradeValue = data.config?.tradeValueBRL || 0;
-    const takeProfit = data.config?.takeProfit || 0;
+      if (p.fdv >= minCap) {
+        const preco = Number(p.priceUsd);
+        const alvo = preco * (1 + takeProfit / 100);
 
-    if (data.simulacoes) {
-      data.simulacoes.forEach(s => {
-        const lucro = tradeValue * (takeProfit / 100);
-        lucroTotal += lucro;
+        status.simulacoes.push({
+          token: p.baseToken.symbol,
+          preco,
+          alvo,
+          hora: new Date().toISOString()
+        });
 
-        const li = document.createElement("li");
-        li.innerText =
-          `${s.token} | Entrada: $${Number(s.preco).toFixed(6)} → Alvo: $${Number(s.alvo).toFixed(6)} (+${takeProfit}%)`;
-        ul.appendChild(li);
-      });
+        console.log("SIMULAÇÃO:", p.baseToken.symbol);
+        break; // 1 por ciclo
+      }
     }
-
-    document.getElementById("profit").innerText =
-      `💰 Lucro acumulado (simulado): R$ ${lucroTotal.toFixed(2)}`;
-
   } catch (e) {
-    document.getElementById("status").innerText =
-      "Erro ao conectar ao servidor";
+    console.log("Erro no scan:", e.message);
   }
 }
 
-async function startBot() {
-  const config = {
-    network: "solana",
-    minCap: Number(document.getElementById("minCap").value),
-    tradeValueBRL: Number(document.getElementById("tradeValue").value),
-    takeProfit: Number(document.getElementById("takeProfit").value)
-  };
+setInterval(scan, 15000);
 
-  await fetch(API + "/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(config)
-  });
-
-  refreshStatus();
-}
-
-async function stopBot() {
-  await fetch(API + "/stop", { method: "POST" });
-  refreshStatus();
-}
-
-setInterval(refreshStatus, 5000);
-refreshStatus();
-</script>
-
-</body>
-</html>
+app.listen(3000, () =>
+  console.log("🚀 Memebot DRY-RUN rodando na porta 3000")
+);
