@@ -7,13 +7,16 @@ async function startBot() {
     takeProfit: Number(document.getElementById("takeProfit").value)
   };
 
-  const res = await fetch("https://memebot-dryrun.onrender.com/start", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(config)
-  });
+  const res = await fetch(
+    "https://memebot-dryrun.onrender.com/start",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(config)
+    }
+  );
 
   const data = await res.json();
 
@@ -22,9 +25,10 @@ async function startBot() {
 }
 
 async function stopBot() {
-  await fetch("https://memebot-dryrun.onrender.com/stop", {
-    method: "POST"
-  });
+  await fetch(
+    "https://memebot-dryrun.onrender.com/stop",
+    { method: "POST" }
+  );
 
   document.getElementById("status").innerText =
     "Status: bot PARADO";
