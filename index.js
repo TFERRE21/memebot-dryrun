@@ -1,132 +1,152 @@
-import express from "express";
-import axios from "axios";
-import cors from "cors";
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Memebot — Solana</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f6f6f6;
+  padding: 30px;
+}
+.card {
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  max-width: 520px;
+}
+label { display:block; margin-top:12px }
+input, button, select {
+  width:100%;
+  padding:10px;
+  margin-top:6px;
+}
+.row { display:flex; gap:10px; margin-top:12px }
+.row button { flex:1 }
+.status {
+  margin-top:15px;
+  background:#eee;
+  padding:10px;
+  border-radius:6px;
+  white-space:pre-wrap;
+}
+table {
+  width:100%;
+  margin-top:15px;
+  border-collapse:collapse;
+}
+th, td {
+  border:1px solid #ccc;
+  padding:6px;
+  font-size:13px;
+}
+th { background:#f0f0f0 }
+.green { color:green }
+.red { color:red }
+</style>
+</head>
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+<body>
 
-/* =========================
-   ESTADO GLOBAL DO BOT
-========================= */
-let status = {
-  ligado: false,
-  config: null,
-  simulacoes: []
-};
+<h2>🤖 Memebot — Solana</h2>
 
-/* =========================
-   ROTAS DA API
-========================= */
-app.post("/start", (req, res) => {
-  const { network, minCap, tradeValueBRL, takeProfit } = req.body;
+<div class="card">
+<label>Market Cap mínimo (USD)</label>
+<input id="minCap" type="number" value="30" />
 
-  status.ligado = true;
-  status.config = {
-    network,
-    minCap,
-    tradeValueBRL,
-    takeProfit
+<label>Valor por trade (R$)</label>
+<input id="tradeValue" type="number" value="100" />
+
+<label>Take Profit (%)</label>
+<input id="takeProfit" type="number" value="20" />
+
+<div class="row">
+<button onclick="startBot()">▶️ Ligar bot</button>
+<button onclick="stopBot()">⏹️ Parar bot</button>
+</div>
+
+<div class="status" id="status">Status: parado</div>
+
+<h3>📊 Resultado</h3>
+<div id="resultado"></div>
+
+<table id="tabela">
+<thead>
+<tr>
+<th>Token</th>
+<th>Entrada</th>
+<th>Alvo</th>
+<th>Lucro (R$)</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+
+<script>
+const API = "https://memebot-dryrun.onrender.com";
+
+async function startBot() {
+  const cfg = {
+    network: "solana",
+    minCap: Number(minCap.value),
+    tradeValueBRL: Number(tradeValue.value),
+    takeProfit: Number(takeProfit.value)
   };
-  status.simulacoes = [];
 
-  res.json({
-    ok: true,
-    msg: "Bot ligado (simulação)",
-    config: status.config
+  await fetch(API + "/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg)
   });
-});
 
-app.post("/stop", (req, res) => {
-  status.ligado = false;
-  status.config = null;
-
-  res.json({ ok: true, msg: "Bot parado" });
-});
-
-app.get("/status", (req, res) => {
-  res.json(status);
-});
-
-/* =========================
-   SCAN REAL + FALLBACK
-========================= */
-async function scan() {
-  if (!status.ligado || !status.config) return;
-
-  try {
-    const resp = await axios.get(
-      "https://api.dexscreener.com/latest/dex/pairs/solana",
-      { timeout: 10000 }
-    );
-
-    const pairs = resp.data?.pairs || [];
-    let encontrou = false;
-
-    for (const p of pairs) {
-      const marketCap =
-        p.fdv || p.marketCap || 0;
-
-      if (marketCap < status.config.minCap) continue;
-      if (!p.priceUsd) continue;
-
-      const entrada = Number(p.priceUsd);
-      const alvo =
-        entrada * (1 + status.config.takeProfit / 100);
-
-      status.simulacoes.push({
-        token: p.baseToken?.symbol || "UNKNOWN",
-        address: p.baseToken?.address || "",
-        dex: p.dexId,
-        entrada,
-        alvo,
-        marketCap,
-        horario: new Date().toISOString()
-      });
-
-      encontrou = true;
-      break; // 1 simulação por ciclo (controle)
-    }
-
-    /* =========================
-       FALLBACK (SE API VAZIA)
-    ========================= */
-    if (!encontrou) {
-      status.simulacoes.push({
-        token: "TEST-MEME",
-        address: "0xTEST",
-        dex: "fallback",
-        entrada: 0.001,
-        alvo: 0.001 * (1 + status.config.takeProfit / 100),
-        marketCap: status.config.minCap + 100,
-        horario: new Date().toISOString()
-      });
-    }
-  } catch (err) {
-    console.error("Erro DexScreener:", err.message);
-
-    // fallback em erro total
-    status.simulacoes.push({
-      token: "ERROR-MEME",
-      address: "0xERROR",
-      dex: "fallback-error",
-      entrada: 0.0005,
-      alvo: 0.0005 * (1 + status.config.takeProfit / 100),
-      marketCap: status.config.minCap + 50,
-      horario: new Date().toISOString()
-    });
-  }
+  document.getElementById("status").innerText =
+    "Status: bot LIGADO\n" + JSON.stringify(cfg, null, 2);
 }
 
-/* =========================
-   LOOP AUTOMÁTICO
-========================= */
-setInterval(scan, 15000);
+async function stopBot() {
+  await fetch(API + "/stop", { method: "POST" });
+  document.getElementById("status").innerText = "Status: parado";
+}
 
-/* =========================
-   START SERVER (RENDER)
-========================= */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("🤖 Memebot DRY-RUN rodando na porta", PORT);
-});
+async function syncStatus() {
+  const r = await fetch(API + "/status");
+  const data = await r.json();
+
+  if (!data.ligado) return;
+
+  let totalLucro = 0;
+  const tbody = document.querySelector("#tabela tbody");
+  tbody.innerHTML = "";
+
+  for (const s of data.simulacoes) {
+    const lucroPct = (s.alvo - s.entrada) / s.entrada;
+    const lucroRS = data.config.tradeValueBRL * lucroPct;
+    totalLucro += lucroRS;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${s.token}</td>
+      <td>${s.entrada}</td>
+      <td>${s.alvo.toFixed(6)}</td>
+      <td class="${lucroRS >= 0 ? "green":"red"}">
+        R$ ${lucroRS.toFixed(2)}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById("resultado").innerHTML = `
+    Trades: <b>${data.simulacoes.length}</b><br>
+    Resultado total:
+    <b class="${totalLucro>=0?"green":"red"}">
+      R$ ${totalLucro.toFixed(2)}
+    </b>
+  `;
+}
+
+setInterval(syncStatus, 5000);
+</script>
+
+</body>
+</html>
