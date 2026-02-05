@@ -1,80 +1,53 @@
 import express from "express";
-import axios from "axios";
 import cors from "cors";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-let status = {
+let state = {
   ligado: false,
   config: null,
   simulacoes: []
 };
 
-// ▶️ START
 app.post("/start", (req, res) => {
-  status.ligado = true;
-  status.config = req.body;
-  status.simulacoes = [];
-
-  console.log("BOT LIGADO COM CONFIG:", status.config);
+  state.ligado = true;
+  state.config = req.body;
+  state.simulacoes = [];
 
   res.json({
     ok: true,
     msg: "Bot ligado (simulação)",
-    config: status.config
+    config: state.config
   });
 });
 
-// ⏹️ STOP
 app.post("/stop", (req, res) => {
-  status.ligado = false;
-  res.json({ ok: true, msg: "Bot parado" });
+  state.ligado = false;
+  res.json({ ok: true });
 });
 
-// 📊 STATUS
 app.get("/status", (req, res) => {
-  res.json(status);
+  res.json(state);
 });
 
-// 🔁 SCAN
+// 🔧 SIMULAÇÃO DE TESTE (FAKE)
 async function scan() {
-  if (!status.ligado || !status.config) return;
+  if (!state.ligado || !state.config) return;
 
-  try {
-    const r = await axios.get(
-      "https://api.dexscreener.com/latest/dex/pairs/solana"
-    );
-
-    const minCap = status.config.minCap;
-    const takeProfit = status.config.takeProfit;
-
-    for (const p of r.data.pairs) {
-      if (!p.fdv || !p.priceUsd) continue;
-
-      if (p.fdv >= minCap) {
-        const preco = Number(p.priceUsd);
-        const alvo = preco * (1 + takeProfit / 100);
-
-        status.simulacoes.push({
-          token: p.baseToken.symbol,
-          preco,
-          alvo,
-          hora: new Date().toISOString()
-        });
-
-        console.log("SIMULAÇÃO:", p.baseToken.symbol);
-        break; // 1 por ciclo
-      }
-    }
-  } catch (e) {
-    console.log("Erro no scan:", e.message);
-  }
+  state.simulacoes.push({
+    token: "TEST-MEME",
+    preco: 0.001,
+    alvo: 0.001 * (1 + state.config.takeProfit / 100),
+    marketCap: state.config.minCap + 1000,
+    horario: new Date().toISOString()
+  });
 }
 
 setInterval(scan, 15000);
 
-app.listen(3000, () =>
-  console.log("🚀 Memebot DRY-RUN rodando na porta 3000")
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () =>
+  console.log("Memebot DRY-RUN ONLINE")
 );
