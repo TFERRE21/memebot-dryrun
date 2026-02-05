@@ -6,14 +6,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+/**
+ * Estado global do bot
+ */
 let state = {
   ligado: false,
   config: null,
   simulacoes: [],
-  vistos: new Set() // evita duplicar tokens
+  vistos: new Set()
 };
 
-/* ---------------- START ---------------- */
+/**
+ * Ligar bot
+ */
 app.post("/start", (req, res) => {
   state.ligado = true;
   state.config = req.body;
@@ -29,14 +34,18 @@ app.post("/start", (req, res) => {
   });
 });
 
-/* ---------------- STOP ---------------- */
+/**
+ * Parar bot
+ */
 app.post("/stop", (req, res) => {
   state.ligado = false;
   console.log("🔴 BOT PARADO");
   res.json({ ok: true });
 });
 
-/* ---------------- STATUS ---------------- */
+/**
+ * Status
+ */
 app.get("/status", (req, res) => {
   res.json({
     ligado: state.ligado,
@@ -45,19 +54,38 @@ app.get("/status", (req, res) => {
   });
 });
 
-/* ---------------- SCAN (DEXSCREENER REAL) ---------------- */
+/**
+ * 🔎 SCAN — DADOS REAIS COM FALLBACK
+ * Roda a cada 15 segundos
+ */
 async function scan() {
   if (!state.ligado || !state.config) return;
 
-  try {
-    const resp = await axios.get(
-      "https://api.dexscreener.com/latest/dex/pairs/solana",
-      { timeout: 10000 }
-    );
+  const minCap = Number(state.config.minCap);
+  const takeProfit = Number(state.config.takeProfit);
 
-    const pairs = resp.data?.pairs || [];
-    const minCap = Number(state.config.minCap);
-    const takeProfit = Number(state.config.takeProfit);
+  try {
+    let pairs = [];
+
+    // 1️⃣ Tentativa principal
+    try {
+      const resp = await axios.get(
+        "https://api.dexscreener.com/latest/dex/pairs/solana",
+        { timeout: 10000 }
+      );
+      pairs = resp.data?.pairs || [];
+    } catch (e) {
+      console.log("⚠️ Falha endpoint pairs");
+    }
+
+    // 2️⃣ Fallback
+    if (pairs.length === 0) {
+      const resp = await axios.get(
+        "https://api.dexscreener.com/latest/dex/search/?q=solana",
+        { timeout: 10000 }
+      );
+      pairs = resp.data?.pairs || [];
+    }
 
     for (const p of pairs) {
       if (!p?.baseToken?.address) continue;
@@ -81,24 +109,28 @@ async function scan() {
       state.simulacoes.push(simulacao);
       state.vistos.add(p.baseToken.address);
 
-      // limita histórico para não crescer infinito
+      // limita histórico
       if (state.simulacoes.length > 20) {
         state.simulacoes.shift();
       }
 
       console.log("📈 SIMULAÇÃO REAL:", simulacao);
-      break; // 1 por ciclo (realista)
+      break; // 1 por ciclo
     }
   } catch (e) {
-    console.error("❌ Erro DexScreener:", e.message);
+    console.error("❌ Erro geral no scan:", e.message);
   }
 }
 
-/* ---------------- LOOP ---------------- */
+/**
+ * Loop automático
+ */
 setInterval(scan, 15000);
 
-/* ---------------- SERVER ---------------- */
+/**
+ * Servidor
+ */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log("🚀 Memebot DRY-RUN (dados reais) rodando na porta", PORT)
-);
+app.listen(PORT, () => {
+  console.log("🚀 Memebot DRY-RUN (dados reais + fallback) ONLINE");
+});
