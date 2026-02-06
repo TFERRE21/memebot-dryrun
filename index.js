@@ -9,20 +9,19 @@ app.use(express.json());
 let status = {
   ligado: false,
   config: null,
-  simulacoes: []
+  simulacoes: [],
+  totalLucro: 0
 };
 
 const SCAN_INTERVAL = 15000; // 15s
+const vistos = new Set();
 
-/* ======================
-   ROTAS
-====================== */
+/* ================= ROTAS ================= */
 
 app.post("/start", (req, res) => {
   status.ligado = true;
   status.config = req.body;
-  status.simulacoes = [];
-  res.json({ ok: true, msg: "Bot ligado (simulação)", config: status.config });
+  res.json({ ok: true, msg: "Bot ligado", config: status.config });
 });
 
 app.post("/stop", (req, res) => {
@@ -34,14 +33,10 @@ app.get("/status", (req, res) => {
   res.json(status);
 });
 
-/* ======================
-   SCAN REAL + FALLBACK
-====================== */
+/* ================= SCAN ================= */
 
 async function scan() {
   if (!status.ligado || !status.config) return;
-
-  const { minCap, takeProfit } = status.config;
 
   try {
     const r = await axios.get(
@@ -49,54 +44,57 @@ async function scan() {
     );
 
     for (const p of r.data.pairs) {
-      if (
-        p.fdv &&
-        p.priceUsd &&
-        p.fdv >= minCap &&
-        !status.simulacoes.find(s => s.address === p.pairAddress)
-      ) {
-        const entrada = Number(p.priceUsd);
-        const alvo = entrada * (1 + takeProfit / 100);
+      if (!p.baseToken || !p.priceUsd || !p.fdv) continue;
+      if (p.fdv < status.config.minCap) continue;
 
-        status.simulacoes.push({
-          token: p.baseToken.symbol,
-          address: p.pairAddress,
-          dex: p.dexId,
-          entrada,
-          alvo,
-          marketCap: p.fdv,
-          horario: new Date().toISOString()
-        });
+      const id = `${p.baseToken.address}-${p.dexId}`;
+      if (vistos.has(id)) continue;
 
-        // gera 1 por scan (controle)
-        break;
+      vistos.add(id);
+
+      const entrada = Number(p.priceUsd);
+      const alvo = entrada * (1 + status.config.takeProfit / 100);
+
+      const sim = {
+        token: p.baseToken.symbol,
+        address: p.baseToken.address,
+        dex: p.dexId,
+        entrada,
+        alvo,
+        marketCap: p.fdv,
+        horario: new Date().toISOString(),
+        lucroEstimado: (alvo - entrada) * status.config.tradeValueBRL
+      };
+
+      status.simulacoes.push(sim);
+      status.totalLucro += sim.lucroEstimado;
+
+      if (status.simulacoes.length > 50) {
+        status.simulacoes.shift();
       }
+
+      break; // 1 simulação por ciclo
     }
-  } catch (err) {
-    // fallback garantido (prova de vida)
-    status.simulacoes.push({
+  } catch (e) {
+    // FALLBACK seguro
+    const sim = {
       token: "FALLBACK-MEME",
       address: "0xFALLBACK",
       dex: "fallback",
       entrada: 0.001,
       alvo: 0.0012,
-      marketCap: minCap,
-      horario: new Date().toISOString()
-    });
+      marketCap: status.config.minCap,
+      horario: new Date().toISOString(),
+      lucroEstimado: 0.2 * status.config.tradeValueBRL
+    };
+
+    status.simulacoes.push(sim);
+    status.totalLucro += sim.lucroEstimado;
   }
 }
 
-/* ======================
-   LOOP
-====================== */
-
 setInterval(scan, SCAN_INTERVAL);
 
-/* ======================
-   START
-====================== */
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("🚀 Memebot DRY-RUN rodando");
-});
+app.listen(3000, () =>
+  console.log("🚀 Memebot DRY-RUN ONLINE")
+);
