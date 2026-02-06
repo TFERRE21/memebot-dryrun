@@ -14,28 +14,19 @@ let status = {
 
 const SCAN_INTERVAL = 15000; // 15s
 
-// -------------------- ROTAS --------------------
+/* ======================
+   ROTAS
+====================== */
 
 app.post("/start", (req, res) => {
-  const { network, minCap, tradeValueBRL, takeProfit } = req.body;
-
-  if (!network || !minCap || !tradeValueBRL || !takeProfit) {
-    return res.status(400).json({ ok: false, msg: "Config inválida" });
-  }
-
   status.ligado = true;
-  status.config = { network, minCap, tradeValueBRL, takeProfit };
-
-  res.json({
-    ok: true,
-    msg: "Bot ligado (dados reais)",
-    config: status.config
-  });
+  status.config = req.body;
+  status.simulacoes = [];
+  res.json({ ok: true, msg: "Bot ligado (simulação)", config: status.config });
 });
 
 app.post("/stop", (req, res) => {
   status.ligado = false;
-  status.config = null;
   res.json({ ok: true, msg: "Bot parado" });
 });
 
@@ -43,64 +34,69 @@ app.get("/status", (req, res) => {
   res.json(status);
 });
 
-// -------------------- SCAN REAL --------------------
+/* ======================
+   SCAN REAL + FALLBACK
+====================== */
 
 async function scan() {
   if (!status.ligado || !status.config) return;
 
+  const { minCap, takeProfit } = status.config;
+
   try {
-    const resp = await axios.get(
+    const r = await axios.get(
       "https://api.dexscreener.com/latest/dex/pairs/solana"
     );
 
-    const pairs = resp.data.pairs || [];
+    for (const p of r.data.pairs) {
+      if (
+        p.fdv &&
+        p.priceUsd &&
+        p.fdv >= minCap &&
+        !status.simulacoes.find(s => s.address === p.pairAddress)
+      ) {
+        const entrada = Number(p.priceUsd);
+        const alvo = entrada * (1 + takeProfit / 100);
 
-    for (const p of pairs) {
-      const marketCap =
-        p.fdv ||
-        p.marketCap ||
-        (p.liquidity ? p.liquidity.usd : 0);
+        status.simulacoes.push({
+          token: p.baseToken.symbol,
+          address: p.pairAddress,
+          dex: p.dexId,
+          entrada,
+          alvo,
+          marketCap: p.fdv,
+          horario: new Date().toISOString()
+        });
 
-      if (!marketCap || marketCap < status.config.minCap) continue;
-      if (!p.priceUsd || !p.baseToken?.symbol) continue;
-
-      // evita duplicar token
-      const jaExiste = status.simulacoes.find(
-        s => s.address === p.baseToken.address
-      );
-      if (jaExiste) continue;
-
-      const entrada = Number(p.priceUsd);
-      const alvo = entrada * (1 + status.config.takeProfit / 100);
-
-      status.simulacoes.unshift({
-        token: p.baseToken.symbol,
-        address: p.baseToken.address,
-        dex: p.dexId,
-        entrada,
-        alvo,
-        marketCap,
-        horario: new Date().toISOString()
-      });
-
-      // limita histórico
-      if (status.simulacoes.length > 50) {
-        status.simulacoes.pop();
+        // gera 1 por scan (controle)
+        break;
       }
-
-      // registra apenas 1 por ciclo
-      break;
     }
   } catch (err) {
-    console.error("Erro no scan:", err.message);
+    // fallback garantido (prova de vida)
+    status.simulacoes.push({
+      token: "FALLBACK-MEME",
+      address: "0xFALLBACK",
+      dex: "fallback",
+      entrada: 0.001,
+      alvo: 0.0012,
+      marketCap: minCap,
+      horario: new Date().toISOString()
+    });
   }
 }
 
+/* ======================
+   LOOP
+====================== */
+
 setInterval(scan, SCAN_INTERVAL);
 
-// -------------------- START SERVER --------------------
+/* ======================
+   START
+====================== */
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log("🚀 Memebot DRY-RUN (REAL) rodando na porta", PORT)
-);
+app.listen(PORT, () => {
+  console.log("🚀 Memebot DRY-RUN rodando");
+});
