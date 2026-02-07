@@ -13,21 +13,21 @@ let status = {
   totalLucro: 0
 };
 
+// guarda tokens já usados
+const vistos = new Set();
+
 const SCAN_INTERVAL = 15000; // 15s
 
-// =======================
-// ROTAS
-// =======================
+/* ================= ROTAS ================= */
 
 app.post("/start", (req, res) => {
   status.ligado = true;
   status.config = req.body;
-  res.json({ ok: true, msg: "Bot ligado (simulação)", config: status.config });
+  res.json({ ok: true, msg: "Bot ligado (REAL + SNIPER)", config: status.config });
 });
 
 app.post("/stop", (req, res) => {
   status.ligado = false;
-  status.config = null;
   res.json({ ok: true, msg: "Bot parado" });
 });
 
@@ -35,25 +35,41 @@ app.get("/status", (req, res) => {
   res.json(status);
 });
 
-// =======================
-// SCAN PRINCIPAL
-// =======================
+/* ================= SCAN SNIPER REAL ================= */
 
 async function scan() {
   if (!status.ligado || !status.config) return;
 
-  try {
-    const { minCap, tradeValueBRL, takeProfit } = status.config;
+  const { minCap, tradeValueBRL, takeProfit } = status.config;
 
+  try {
     const r = await axios.get(
-      "https://api.dexscreener.com/latest/dex/pairs/solana"
+      "https://api.dexscreener.com/latest/dex/pairs/solana",
+      { timeout: 10000 }
     );
 
-    const pairs = r.data.pairs || [];
+    const pairs = r.data?.pairs || [];
+    const agora = Date.now();
 
     for (const p of pairs) {
-      if (!p.priceUsd || !p.fdv) continue;
-      if (p.fdv < minCap) continue;
+      // filtros básicos
+      if (!p.baseToken?.address) continue;
+      if (!p.priceUsd || !p.liquidity?.usd) continue;
+      if (!p.fdv || p.fdv < minCap) continue;
+
+      // 🔹 SNIPER FILTERS
+      if (p.liquidity.usd < 1000) continue;          // liquidez mínima
+      if (p.volume?.h24 < 2000) continue;            // volume mínimo
+      if (!["raydium", "orca"].includes(p.dexId)) continue;
+
+      // token novo (até 60 min)
+      if (!p.pairCreatedAt) continue;
+      if (agora - p.pairCreatedAt > 60 * 60 * 1000) continue;
+
+      const tokenId = p.baseToken.address;
+      if (vistos.has(tokenId)) continue;
+
+      vistos.add(tokenId);
 
       const entrada = Number(p.priceUsd);
       const alvo = entrada * (1 + takeProfit / 100);
@@ -61,51 +77,36 @@ async function scan() {
 
       status.simulacoes.push({
         token: p.baseToken.symbol,
-        address: p.baseToken.address,
+        address: tokenId,
         dex: p.dexId,
         entrada,
         alvo,
         marketCap: p.fdv,
+        liquidez: p.liquidity.usd,
+        volume24h: p.volume.h24,
         horario: new Date().toISOString(),
         lucroEstimado
       });
 
       status.totalLucro += lucroEstimado;
 
-      // limita histórico
+      // mantém histórico limpo
       if (status.simulacoes.length > 20) {
         status.simulacoes.shift();
       }
 
-      break; // 1 trade por ciclo
+      break; // 1 sniper trade por scan
     }
-
   } catch (err) {
-    // FALLBACK (prova de vida)
-    const lucroEstimado = (status.config.tradeValueBRL * status.config.takeProfit) / 100;
-
-    status.simulacoes.push({
-      token: "FALLBACK-MEME",
-      address: "0xFALLBACK",
-      dex: "fallback",
-      entrada: 0.001,
-      alvo: 0.0012,
-      marketCap: status.config.minCap,
-      horario: new Date().toISOString(),
-      lucroEstimado
-    });
-
-    status.totalLucro += lucroEstimado;
-
-    if (status.simulacoes.length > 20) {
-      status.simulacoes.shift();
-    }
+    console.error("Erro no scan sniper:", err.message);
   }
 }
 
 setInterval(scan, SCAN_INTERVAL);
 
+/* ================= START ================= */
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
-  console.log("🤖 Memebot DRY-RUN rodando")
+  console.log("🚀 Memebot REAL + SNIPER rodando")
 );
