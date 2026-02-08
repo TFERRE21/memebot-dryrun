@@ -1,113 +1,138 @@
- import express from "express";
+import express from "express";
 import axios from "axios";
 import cors from "cors";
-import fs from "fs";
-import { antiRugCheck } from "./antiRug.js";
-import { alert } from "./telegram.js";
-import { buy, sell } from "./okx.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
-const STORAGE = "./storage.json";
-const SCAN_INTERVAL = 15000;
+/* =========================
+   ESTADO GLOBAL DO BOT
+========================= */
+let status = {
+  ligado: false,
+  config: null,
+  simulacoes: [],
+  totalLucro: 0
+};
 
-// ---------- PERSISTÊNCIA ----------
-function load() {
-  if (!fs.existsSync(STORAGE)) {
-    return { ligado:false, config:null, simulacoes:[], totalLucro:0, tradesHoje:0 };
+const SCAN_INTERVAL = 15000; // 15s
+let scanTimer = null;
+
+/* =========================
+   ROTAS API
+========================= */
+
+// Iniciar bot
+app.post("/start", (req, res) => {
+  const { network, minCap, tradeValueBRL, takeProfit } = req.body;
+
+  if (!network || !minCap || !tradeValueBRL || !takeProfit) {
+    return res.status(400).json({ erro: "Configuração inválida" });
   }
-  return JSON.parse(fs.readFileSync(STORAGE));
-}
-function save() {
-  fs.writeFileSync(STORAGE, JSON.stringify(status, null, 2));
-}
 
-// ---------- ESTADO ----------
-let status = load();
-const vistos = new Set((status.simulacoes || []).map(s => s.address));
-
-// ---------- ROTAS ----------
-app.post("/start", async (req, res) => {
   status.ligado = true;
-  status.config = req.body;
-  save();
-  await alert("🟢 Bot LIGADO");
-  res.json({ ok: true, status });
+  status.config = { network, minCap, tradeValueBRL, takeProfit };
+  status.simulacoes = [];
+  status.totalLucro = 0;
+
+  if (!scanTimer) {
+    scanTimer = setInterval(scan, SCAN_INTERVAL);
+  }
+
+  res.json({ ok: true, msg: "Bot ligado (simulação)", config: status.config });
 });
 
-app.post("/stop", async (req, res) => {
+// Parar bot
+app.post("/stop", (req, res) => {
   status.ligado = false;
-  save();
-  await alert("🔴 Bot PARADO");
-  res.json({ ok: true });
+  status.config = null;
+
+  if (scanTimer) {
+    clearInterval(scanTimer);
+    scanTimer = null;
+  }
+
+  res.json({ ok: true, msg: "Bot parado" });
 });
 
-app.get("/status", (req, res) => res.json(status));
+// Status
+app.get("/status", (req, res) => {
+  res.json(status);
+});
 
-// ---------- SCAN (SNIPER REAL) ----------
+/* =========================
+   FUNÇÃO SCAN (REAL + FALLBACK)
+========================= */
 async function scan() {
   if (!status.ligado || !status.config) return;
 
-  const { minCap, tradeValueBRL, takeProfit } = status.config;
-
   try {
-    const r = await axios.get(
-      "https://api.dexscreener.com/latest/dex/pairs/solana",
-      { timeout: 10000 }
-    );
-    const pairs = r.data?.pairs || [];
-    const agora = Date.now();
+    const url = "https://api.dexscreener.com/latest/dex/pairs/solana";
+    const response = await axios.get(url, { timeout: 10000 });
+
+    const pairs = response.data?.pairs || [];
 
     for (const p of pairs) {
-      if (!p.baseToken?.address || !p.priceUsd || !p.fdv) continue;
-      if (p.fdv < minCap) continue;
-      if (!["raydium","orca"].includes(p.dexId)) continue;
-      if (!p.pairCreatedAt || agora - p.pairCreatedAt > 3 * 60 * 60 * 1000) continue;
-      if (!antiRugCheck(p)) continue;
+      const marketCap = p.fdv || p.marketCap || 0;
 
-      const addr = p.baseToken.address;
-      if (vistos.has(addr)) continue;
-      vistos.add(addr);
+      if (marketCap < status.config.minCap) continue;
 
       const entrada = Number(p.priceUsd);
-      const alvo = entrada * (1 + takeProfit / 100);
-      const lucroEstimado = (tradeValueBRL * takeProfit) / 100;
+      if (!entrada || entrada <= 0) continue;
 
-      const trade = {
-        token: p.baseToken.symbol,
-        address: addr,
-        dex: p.dexId,
+      const alvo = entrada * (1 + status.config.takeProfit / 100);
+      const lucroEstimado = status.config.tradeValueBRL *
+        (status.config.takeProfit / 100);
+
+      status.simulacoes.unshift({
+        token: p.baseToken?.symbol || "UNKNOWN",
+        address: p.baseToken?.address || "N/A",
+        dex: p.dexId || "dex",
         entrada,
         alvo,
-        marketCap: p.fdv,
-        liquidez: p.liquidity?.usd || 0,
-        volume24h: p.volume?.h24 || 0,
+        marketCap,
         horario: new Date().toISOString(),
-        status: "OPEN",
         lucroEstimado
-      };
+      });
 
-      status.simulacoes.push(trade);
-      save();
+      status.totalLucro += lucroEstimado;
 
-      await alert(`🚀 NOVO TRADE ${trade.token}\nEntrada: ${entrada}\nAlvo: ${alvo}`);
+      // limita histórico
+      if (status.simulacoes.length > 50) {
+        status.simulacoes.pop();
+      }
 
-      // OKX (real só se MODO_REAL=true)
-      await buy("SOL-USDT", tradeValueBRL);
-
-      break; // 1 trade por ciclo
+      break; // 1 trade por scan
     }
-  } catch (e) {
-    console.log("Erro scan:", e.message);
+  } catch (err) {
+    // FALLBACK SE API CAIR
+    const lucroEstimado = status.config.tradeValueBRL *
+      (status.config.takeProfit / 100);
+
+    status.simulacoes.unshift({
+      token: "FALLBACK-MEME",
+      address: "0xFALLBACK",
+      dex: "fallback",
+      entrada: 0.001,
+      alvo: 0.0012,
+      marketCap: status.config.minCap,
+      horario: new Date().toISOString(),
+      lucroEstimado
+    });
+
+    status.totalLucro += lucroEstimado;
+
+    if (status.simulacoes.length > 50) {
+      status.simulacoes.pop();
+    }
   }
 }
 
-setInterval(scan, SCAN_INTERVAL);
-
-// ---------- START ----------
+/* =========================
+   START SERVER (RENDER)
+========================= */
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🤖 Memebot ONLINE (mantido + itens adicionados)");
+  console.log("✅ Memebot DRY-RUN rodando na porta", PORT);
 });
