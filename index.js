@@ -10,9 +10,9 @@ app.use(express.json());
 // CONFIG
 // =========================
 const PORT = process.env.PORT || 3000;
-const SCAN_INTERVAL = 15000; // 15s
-const MONITOR_INTERVAL = 8000; // 8s
-const MODO_REAL = process.env.MODO_REAL === "true"; // false por padrão
+const SCAN_INTERVAL = 15000;
+const MONITOR_INTERVAL = 8000;
+const MODO_REAL = process.env.MODO_REAL === "true";
 
 // =========================
 // ESTADO
@@ -63,7 +63,7 @@ app.post("/stop", (req, res) => {
 app.get("/status", (req, res) => res.json(status));
 
 // =========================
-// SCAN REAL (DEXSCREENER)
+// SCAN REAL (SEM FALLBACK)
 // =========================
 async function scan() {
   if (!status.ligado || !status.config) return;
@@ -78,18 +78,12 @@ async function scan() {
     const now = Date.now();
 
     for (const p of pairs) {
-      // filtros básicos
       if (!p.baseToken?.address) continue;
       if (!p.priceUsd || !p.fdv) continue;
       if (p.fdv < status.config.minCap) continue;
-
-      // DEX reais
       if (!["raydium", "orca"].includes(p.dexId)) continue;
 
-      // token recente (até 3h)
       if (!p.pairCreatedAt || now - p.pairCreatedAt > 3 * 60 * 60 * 1000) continue;
-
-      // liquidez/volume mínimos
       if ((p.liquidity?.usd || 0) < 500) continue;
       if ((p.volume?.h24 || 0) < 500) continue;
 
@@ -99,7 +93,8 @@ async function scan() {
 
       const entrada = Number(p.priceUsd);
       const alvo = entrada * (1 + status.config.takeProfit / 100);
-      const lucroEstimado = status.config.tradeValueBRL * (status.config.takeProfit / 100);
+      const lucroEstimado =
+        status.config.tradeValueBRL * (status.config.takeProfit / 100);
 
       status.simulacoes.push({
         token: p.baseToken.symbol,
@@ -111,7 +106,7 @@ async function scan() {
         liquidez: p.liquidity.usd,
         volume24h: p.volume.h24,
         horario: new Date().toISOString(),
-        status: "OPEN",
+        status: "ABERTO",
         lucroEstimado,
         maxPreco: entrada
       });
@@ -119,22 +114,46 @@ async function scan() {
       break; // 1 trade por ciclo
     }
   } catch (e) {
-    console.log("Erro scan:", e.message);
+    console.log("Erro no scan:", e.message);
   }
 }
 
 // =========================
-// MONITOR REAL (PREÇO REAL)
+// MONITOR REAL
 // =========================
 async function monitorTrades() {
   if (!status.ligado) return;
 
   for (const t of status.simulacoes) {
-    if (t.status !== "OPEN") continue;
+    if (t.status !== "ABERTO") continue;
 
     try {
-      // busca preço REAL do par
       const r = await axios.get(
         `https://api.dexscreener.com/latest/dex/tokens/${t.address}`,
         { timeout: 10000 }
       );
+
+      const pair = r.data?.pairs?.[0];
+      if (!pair?.priceUsd) continue;
+
+      const precoAtual = Number(pair.priceUsd);
+      if (precoAtual > t.maxPreco) t.maxPreco = precoAtual;
+
+      if (precoAtual >= t.alvo) {
+        t.status = "FECHADO";
+        status.totalLucro += t.lucroEstimado;
+
+        if (MODO_REAL) {
+          // aqui entra OKX real depois
+        }
+      }
+    } catch (e) {
+      console.log("Erro monitor:", e.message);
+    }
+  }
+}
+
+// =========================
+app.listen(PORT, () =>
+  console.log("🚀 Memebot rodando com MOEDAS REAIS (sem fallback)")
+);
